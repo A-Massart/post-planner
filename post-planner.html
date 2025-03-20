@@ -110,6 +110,13 @@
                 };
                 reader.readAsDataURL(file);
             }
+
+            var elem = document.getElementById("addPostBtn");
+            elem.textContent = "Ajoutée !";
+            setTimeout(() => {
+                elem.textContent = "Ajouter la publication";
+            }, 2000);
+
         }
 
         function deletePost(id) {
