@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planificateur de publications Instagram</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+<!-- CSS -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Gabarito:wght@400..900&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@300..700&display=swap');
+
+        .gabarito {
+          font-family: "Gabarito", sans-serif;
+          font-optical-sizing: auto;
+          font-weight: 750;
+          font-style: normal;
+        }
+
+        * {
+          font-family: "Quicksand", sans-serif;
+          font-optical-sizing: auto;
+          font-weight: 400;
+          font-style: normal;
+        }
+
+        body { padding: 20px; max-width: 600px; margin: auto; }
+        .container { background: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
+        input, textarea, button { width: 100%; padding: 10px; margin: 5px 0; border: 1px solid #ccc; border-radius: 20px; }
+        button { background-color: #49a2b5; color: white; cursor: pointer; }
+        button:disabled { background-color: gray; cursor: not-allowed; }
+        .post { border: 1px solid #ddd; padding: 10px; margin-top: 10px; border-radius: 5px; position: relative; }
+        .post img, .post video { width: 50px; height: 50px; object-fit: cover; border-radius: 5px; margin-right: 5px; }
+        .published { opacity: 0.5; }
+        .delete-btn { position: absolute; top: 10px; right: 10px; background: #cb8d7f; color: white; border: none; cursor: pointer; padding: 5px; border-radius: 50%; width:40px; height: 40px;}
+        #file-size-warning { color: red; font-weight: bold; display: none; }
+    </style>
+</head>
+
+<!-- HTML -->
+<body>
+    <div class="container">
+        <h1 class="gabarito">Planificateur de publications Instagram</h1>
+        <input type="text"  id="title" placeholder="Titre">
+        <textarea  id="description" placeholder="Description"></textarea>
+        <input type="date"  id="date">
+        <input type="file" id="media" multiple accept="image/*,video/*" onchange="checkFileSize()">
+        <p  id="file-size-warning">La taille totale des fichiers ne doit pas dépasser 50 Mo.</p>
+        <button  id="addPostBtn" onclick="addPost()">Ajouter la publication</button>
+        <h2 class="gabarito">Publications prévues</h2>
+        <div id="posts"></div>
+    </div>
+
+<!-- JAVASCRIPT -->
+    <script>
+        const MAX_TOTAL_SIZE_MB = 50 * 1024 * 1024;
+        let db;
+
+        function initDB() {
+            let request = indexedDB.open("InstagramPlannerDB", 1);
+            request.onupgradeneeded = function(event) {
+                db = event.target.result;
+                if (!db.objectStoreNames.contains("posts")) {
+                    db.createObjectStore("posts", { keyPath: "id", autoIncrement: true });
+                }
+            };
+            request.onsuccess = function(event) {
+                db = event.target.result;
+                renderPosts();
+            };
+        }
+
+        function checkFileSize() {
+            let files = document.getElementById("media").files;
+            let totalSize = 0;
+            for (let file of files) {
+                totalSize += file.size;
+            }
+
+            let warning = document.getElementById("file-size-warning");
+            let addButton = document.getElementById("addPostBtn");
+
+            if (totalSize > MAX_TOTAL_SIZE_MB) {
+                warning.style.display = "block";
+                addButton.disabled = true;
+            } else {
+                warning.style.display = "none";
+                addButton.disabled = false;
+            }
+        }
+
+        function addPost() {
+            let title = document.getElementById("title").value;
+            let description = document.getElementById("description").value;
+            let date = document.getElementById("date").value;
+            let files = document.getElementById("media").files;
+            if (!title || !description || !date || files.length === 0) return;
+            let media = [];
+            for (let file of files) {
+                let reader = new FileReader();
+                reader.onload = function(event) {
+                    media.push({ name: file.name, url: event.target.result, type: file.type });
+                    if (media.length === files.length) {
+                        let transaction = db.transaction(["posts"], "readwrite");
+                        let store = transaction.objectStore("posts");
+                        store.add({ title, description, date, media, published: false });
+                        transaction.oncomplete = renderPosts;
+                    }
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function deletePost(id) {
+            let transaction = db.transaction(["posts"], "readwrite");
+            let store = transaction.objectStore("posts");
+            store.delete(id);
+            transaction.oncomplete = renderPosts;
+        }
+
+        function markAsPublished(id) {
+            let transaction = db.transaction(["posts"], "readwrite");
+            let store = transaction.objectStore("posts");
+            let request = store.get(id);
+            request.onsuccess = function() {
+                let post = request.result;
+                post.published = true;
+                store.put(post);
+                transaction.oncomplete = renderPosts;
+            };
+        }
+
+        function downloadFiles(post) {
+            let zip = new JSZip();
+            post.media.forEach(file => {
+                zip.file(file.name, file.url.split(",")[1], { base64: true });
+            });
+            zip.generateAsync({ type: "blob" }).then(content => {
+                let a = document.createElement("a");
+                a.href = URL.createObjectURL(content);
+                a.download = post.title + ".zip";
+                a.click();
+            });
+        }
+
+        function renderPosts() {
+            let transaction = db.transaction(["posts"], "readonly");
+            let store = transaction.objectStore("posts");
+            let request = store.getAll();
+            request.onsuccess = function() {
+                let posts = request.result;
+                let postsContainer = document.getElementById('posts');
+                postsContainer.innerHTML = "";
+                posts.forEach(post => {
+                    let postDiv = document.createElement('div');
+                    postDiv.className = `post ${post.published ? 'published' : ''}`;
+                    postDiv.innerHTML = `
+                        <button class="delete-btn" onclick="deletePost(${post.id})">🗑️</button>
+                        <h3>${post.title}</h3>
+                        <p>${post.description}</p>
+                        <p><small>Prévu pour le ${new Date(post.date).toLocaleDateString('fr-FR')}</small></p>
+                        <div>
+                            ${post.media.map(media => media.type.startsWith('image')
+                                ? `<img src="${media.url}" alt="Image">`
+                                : `<video src="${media.url}" controls></video>`).join('')}
+                        </div>
+                        <button onclick="markAsPublished(${post.id})" ${post.published ? 'disabled' : ''}>${post.published ? "Publié" : "Marquer comme publié"}</button>
+                        <button onclick='downloadFiles(${JSON.stringify(post)})'>Télécharger les fichiers</button>
+                    `;
+                    postsContainer.appendChild(postDiv);
+                });
+            };
+        }
+
+        window.onload = initDB;
+    </script>
+</body>
+</html>
